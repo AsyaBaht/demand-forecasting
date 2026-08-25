@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "demand-forecasting"
+version = "0.1.0"
+description = "Weekly retail demand forecasting on Iowa liquor sales — naive/statistical/global-model tiered stack with conformal prediction intervals, backtested with rolling-origin evaluation."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "lightgbm>=4.0",
+    "statsmodels>=0.14",
+    "scikit-learn>=1.3",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+]
+
+[project.optional-dependencies]
+bigquery = ["google-cloud-bigquery>=3.11", "db-dtypes>=1.2"]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+
+[project.scripts]
+demand-forecasting = "demand_forecasting.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+src = ["src", "tests"]

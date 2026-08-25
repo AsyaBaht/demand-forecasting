@@ -1,0 +1,31 @@
+__pycache__/
+*.pyc
+.env
+.venv/
+.idea
+
+# data lake tiers — regenerable from BigQuery, not versioned.
+# .gitkeep files keep the directory structure tracked.
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# packaging
+*.egg-info/
+build/
+dist/
+
+# test/tooling caches
+.pytest_cache/
+.ruff_cache/
+
+# eval reports are regenerable via the eval CLI, not versioned — keep the dir.
+reports/eval_runs/*
+!reports/eval_runs/.gitkeep
+
+# GCP credential files — never belong in the repo
+*-key.json
+*service-account*.json
+*credentials*.json
+client_secret*.json
