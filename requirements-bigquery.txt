@@ -1,0 +1,8 @@
+# Needed only for `demand-forecasting extract` — pulling real data out of
+# BigQuery. Mirrors the [project.optional-dependencies.bigquery] table in
+# pyproject.toml. Not needed to run the test suite.
+#
+# Install: pip install -r requirements.txt -r requirements-bigquery.txt
+# Equivalent to: pip install -e ".[bigquery]"
+google-cloud-bigquery==3.44.0
+db-dtypes==1.7.1

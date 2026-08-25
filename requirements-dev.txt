@@ -1,0 +1,7 @@
+# Dev tooling — running the test suite and linting. Mirrors the
+# [project.optional-dependencies.dev] table in pyproject.toml.
+#
+# Install: pip install -r requirements.txt -r requirements-dev.txt
+# Equivalent to: pip install -e ".[dev]"
+pytest==9.1.1
+ruff==0.16.4

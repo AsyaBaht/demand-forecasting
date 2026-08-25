@@ -136,3 +136,13 @@ demand-forecasting backtest
 `extract` and `aggregate` are not covered by the test suite — they need
 real credentials and a real query. Everything else runs against the
 synthetic fixture in `tests/conftest.py`.
+
+`pyproject.toml` is the source of truth for dependencies. If you'd rather
+not install the package itself, `requirements.txt` /
+`requirements-bigquery.txt` / `requirements-dev.txt` mirror its
+`[project.dependencies]` / `[project.optional-dependencies.bigquery]` /
+`[project.optional-dependencies.dev]` tables as pinned versions:
+
+```bash
+pip install -r requirements.txt -r requirements-bigquery.txt -r requirements-dev.txt
+```
