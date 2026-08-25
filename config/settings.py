@@ -5,6 +5,8 @@ scattered across scripts as magic numbers.
 
 Override any field with an env var prefixed `DEMAND_FORECASTING_`, e.g.
 `DEMAND_FORECASTING_TOP_N_STORES=10`, or via a `.env` file in the repo root.
+
+Author: Anastasiia Bakhtoiarova
 """
 from __future__ import annotations
 

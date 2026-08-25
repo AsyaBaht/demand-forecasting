@@ -20,6 +20,8 @@ test_baselines.py). The full fixture also carries a linear trend and the
 COVID shock, both of which can flip that ordering over a short horizon or
 a year-later "same week last year" reference — test_pipeline_offline.py
 checks for that honestly instead of assuming seasonal-naive always wins.
+
+Author: Anastasiia Bakhtoiarova
 """
 from __future__ import annotations
 

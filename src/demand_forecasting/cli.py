@@ -11,6 +11,8 @@ whatever is in data/processed and writes a timestamped JSON report to
 reports/eval_runs/. None of this is exercised by pytest — see
 tests/test_pipeline_offline.py for the equivalent run against the
 synthetic fixture.
+
+Author: Anastasiia Bakhtoiarova
 """
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ from demand_forecasting.evaluation.eval_suite import run_backtest, write_report
 
 
 def cmd_extract(args: argparse.Namespace) -> None:
+    """`demand-forecasting extract` — pull the raw extract from BigQuery."""
     from demand_forecasting.ingestion.extract_bigquery import extract_and_save
 
     path = extract_and_save(project_id=args.project)
@@ -30,6 +33,7 @@ def cmd_extract(args: argparse.Namespace) -> None:
 
 
 def cmd_aggregate(args: argparse.Namespace) -> None:
+    """`demand-forecasting aggregate` — gap-fill raw rows into DemandSeries."""
     from demand_forecasting.ingestion.aggregate import load_and_aggregate, save_processed
 
     series_list = load_and_aggregate()
@@ -38,6 +42,8 @@ def cmd_aggregate(args: argparse.Namespace) -> None:
 
 
 def cmd_backtest(args: argparse.Namespace) -> None:
+    """`demand-forecasting backtest` — run the rolling-origin eval suite
+    against the processed series and write a timestamped JSON report."""
     from demand_forecasting.ingestion.aggregate import load_and_aggregate
 
     series_list = load_and_aggregate()
@@ -59,6 +65,7 @@ def cmd_backtest(args: argparse.Namespace) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Entry point installed as the `demand-forecasting` console script."""
     parser = argparse.ArgumentParser(prog="demand-forecasting", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 

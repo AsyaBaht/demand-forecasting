@@ -1,4 +1,7 @@
-"""Weekly retail demand forecasting on Iowa liquor sales."""
+"""Weekly retail demand forecasting on Iowa liquor sales.
+
+Author: Anastasiia Bakhtoiarova
+"""
 import sys as _sys
 from pathlib import Path as _Path
 

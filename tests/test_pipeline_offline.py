@@ -3,6 +3,8 @@ Full offline pipeline: synthetic raw rows -> aggregated DemandSeries ->
 tiered stack -> conformal -> rolling-origin backtest -> report. Zero
 BigQuery access anywhere in this path — everything downstream of
 tests/conftest.py's synthetic_raw_frame.
+
+Author: Anastasiia Bakhtoiarova
 """
 from __future__ import annotations
 

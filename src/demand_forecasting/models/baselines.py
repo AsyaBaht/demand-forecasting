@@ -4,6 +4,8 @@ exist — they're the reference frame the statistical and global tiers have
 to actually beat. A model that loses to seasonal-naive on liquor sales
 (which has a strong, well-known weekly-seasonal pattern around holidays)
 isn't adding value, no matter how sophisticated it is.
+
+Author: Anastasiia Bakhtoiarova
 """
 from __future__ import annotations
 

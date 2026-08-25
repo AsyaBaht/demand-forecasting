@@ -16,6 +16,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class DemandObservation(BaseModel):
+    """One observed (or gap-filled zero) week of bottles sold."""
+
     week_start: date
     bottles_sold: float = Field(ge=0)
 
@@ -49,6 +51,8 @@ class DemandSeries(BaseModel):
 
 
 class ForecastPoint(BaseModel):
+    """One forecasted week's point value, before any conformal interval."""
+
     week_start: date
     point_forecast: float
 

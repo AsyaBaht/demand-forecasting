@@ -9,6 +9,8 @@ seasonal windows) assumes a contiguous weekly index. Series that are too
 short to be worth forecasting (a store/category pair that only shows up
 for a few months) are dropped rather than gap-filled across a mostly-empty
 history.
+
+Author: Anastasiia Bakhtoiarova
 """
 from __future__ import annotations
 
@@ -23,6 +25,9 @@ REQUIRED_COLUMNS = {"week_start", "store_number", "liquor_type", "bottles_sold"}
 
 
 def raw_to_series(raw: pd.DataFrame, min_length_weeks: int | None = None) -> list[DemandSeries]:
+    """Group raw rows by (store_number, liquor_type), gap-fill each group to
+    a contiguous weekly index (zero-filling weeks with no sale), and drop
+    any resulting series shorter than min_length_weeks."""
     missing = REQUIRED_COLUMNS - set(raw.columns)
     if missing:
         raise ValueError(f"raw extract is missing required columns: {sorted(missing)}")
@@ -69,12 +74,15 @@ def series_to_frame(series_list: list[DemandSeries]) -> pd.DataFrame:
 
 
 def load_and_aggregate(raw_path: str | None = None) -> list[DemandSeries]:
+    """Read the raw parquet extract and turn it into DemandSeries."""
     path = Path(raw_path or settings.raw_data_dir) / "demand_raw.parquet"
     raw = pd.read_parquet(path)
     return raw_to_series(raw)
 
 
 def save_processed(series_list: list[DemandSeries], out_path: str | None = None) -> Path:
+    """Write the long-format series frame to
+    `<out_path or settings.processed_data_dir>/demand_series.parquet`."""
     frame = series_to_frame(series_list)
     out = Path(out_path or settings.processed_data_dir) / "demand_series.parquet"
     out.parent.mkdir(parents=True, exist_ok=True)

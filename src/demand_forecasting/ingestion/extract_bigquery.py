@@ -4,6 +4,8 @@ writes the raw result to data/raw/. Requires GCP application-default
 credentials (`gcloud auth application-default login`) with BigQuery read
 access — not exercised by the test suite, which runs entirely against the
 synthetic fixture in tests/conftest.py.
+
+Author: Anastasiia Bakhtoiarova
 """
 from __future__ import annotations
 
@@ -27,6 +29,9 @@ def run_extraction(project_id: str | None = None, sql_path: str | None = None) -
 
 
 def extract_and_save(project_id: str | None = None, out_path: str | None = None) -> Path:
+    """Run the extraction and write the result to
+    `<out_path or settings.raw_data_dir>/demand_raw.parquet`, returning the
+    path written."""
     df = run_extraction(project_id=project_id)
     out = Path(out_path or settings.raw_data_dir) / "demand_raw.parquet"
     out.parent.mkdir(parents=True, exist_ok=True)

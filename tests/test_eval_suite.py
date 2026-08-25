@@ -1,3 +1,11 @@
+"""
+Tests for the eval suite's building blocks (see evaluation/eval_suite.py):
+WAPE/RMSE, rolling-origin fold generation and COVID flagging, and report
+serialization. See test_pipeline_offline.py for the full run_backtest
+integration test.
+
+Author: Anastasiia Bakhtoiarova
+"""
 from __future__ import annotations
 
 import json

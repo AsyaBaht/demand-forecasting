@@ -11,6 +11,8 @@ a poor fit (see `sarimax_forecast`), but Holt-Winters is the default: it's
 faster to fit ~200 times per backtest fold and, empirically on this
 dataset, no worse for weekly bottle counts with a strong single seasonal
 period.
+
+Author: Anastasiia Bakhtoiarova
 """
 from __future__ import annotations
 
@@ -23,6 +25,10 @@ from statsmodels.tsa.statespace.sarimax import SARIMAX
 
 
 def exponential_smoothing_forecast(history: pd.Series, horizon: int, season_length: int = 52) -> np.ndarray:
+    """Holt-Winters forecast for one series. Uses an additive trend +
+    seasonal fit when there's at least two full seasons of history;
+    otherwise falls back to a damped trend-only fit (see
+    `_damped_trend_only`)."""
     values = history.to_numpy(dtype=float)
     # Additive trend clips at zero for series that are trending down toward
     # zero bottles/week; multiplicative seasonality needs strictly positive
@@ -64,6 +70,11 @@ def sarimax_forecast(
     order: tuple[int, int, int] = (1, 1, 1),
     seasonal_order: tuple[int, int, int, int] = (1, 0, 1, 52),
 ) -> np.ndarray:
+    """SARIMAX forecast for one series — an alternative to
+    `exponential_smoothing_forecast` for series whose autocorrelation
+    structure Holt-Winters' additive form fits poorly. Seasonal terms are
+    dropped automatically for series with less than two full seasons of
+    history, since SARIMAX can't estimate them reliably from less."""
     values = history.to_numpy(dtype=float)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")

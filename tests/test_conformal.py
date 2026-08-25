@@ -1,3 +1,10 @@
+"""
+Tests for split conformal calibration and interval wrapping (see
+conformal.py) — coverage targets, per-group interval widths, and the
+small-group fallback.
+
+Author: Anastasiia Bakhtoiarova
+"""
 from __future__ import annotations
 
 from datetime import date

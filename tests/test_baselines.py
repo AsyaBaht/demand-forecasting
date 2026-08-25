@@ -1,3 +1,9 @@
+"""
+Tests for the naive baselines — the reference frame every fancier tier
+has to beat (see models/baselines.py).
+
+Author: Anastasiia Bakhtoiarova
+"""
 from __future__ import annotations
 
 import numpy as np

@@ -21,6 +21,8 @@ Feature leakage note: every lag and rolling-window feature is built from
 only ever sees data through week t-1. Recursive multi-step prediction
 mirrors this exactly — each forecasted step is appended to the series
 before computing features for the next step.
+
+Author: Anastasiia Bakhtoiarova
 """
 from __future__ import annotations
 
@@ -43,6 +45,10 @@ DEFAULT_LGB_PARAMS: dict = {
 
 
 class GlobalDemandModel:
+    """One LightGBM regressor fit jointly across every series passed to
+    `fit`. `lag_weeks` and `rolling_windows` control the feature set (see
+    module docstring); `lgb_params` overrides DEFAULT_LGB_PARAMS."""
+
     def __init__(
         self,
         lag_weeks: list[int],
@@ -62,6 +68,9 @@ class GlobalDemandModel:
         return ["store_number", "liquor_type"]
 
     def _feature_frame_for_training(self, series_list: list[DemandSeries]) -> pd.DataFrame:
+        """Build the long-format (series x week) training frame: one row
+        per observed week per series, with lag/rolling/calendar features
+        and the raw bottles_sold target."""
         frames = []
         for s in series_list:
             sr = s.as_series()
@@ -91,6 +100,9 @@ class GlobalDemandModel:
         return full[full[min_lag_col].notna()].reset_index(drop=True)
 
     def fit(self, series_list: list[DemandSeries]) -> None:
+        """Fit the joint LightGBM model on every series in series_list.
+        Records the store_number / liquor_type categories seen here so
+        `predict` can encode new series consistently."""
         frame = self._feature_frame_for_training(series_list)
         if frame.empty:
             raise ValueError("no training rows after feature construction — series too short for configured lags")
@@ -116,6 +128,9 @@ class GlobalDemandModel:
     def _next_step_feature_row(
         self, extended: pd.Series, store_number: int, liquor_type: str, target_week: pd.Timestamp
     ) -> pd.DataFrame:
+        """Build the single feature row for forecasting target_week, given
+        `extended` (history plus any already-forecasted steps). Mirrors the
+        shift(1)-then-rolling logic in `_feature_frame_for_training` exactly."""
         vals = extended.to_numpy(dtype=float)
         feat: dict = {}
         for lag in self.lag_weeks:
@@ -137,6 +152,9 @@ class GlobalDemandModel:
         return row[self.feature_columns]
 
     def predict(self, series: DemandSeries, horizon: int) -> np.ndarray:
+        """Recursive multi-step forecast: predict one week, append the
+        prediction to the series, recompute features, repeat. Negative
+        predictions are clipped to zero (bottle counts can't be negative)."""
         if self.model is None:
             raise RuntimeError("GlobalDemandModel must be fit before predict")
 

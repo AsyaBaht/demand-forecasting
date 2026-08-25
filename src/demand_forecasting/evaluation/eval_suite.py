@@ -40,6 +40,10 @@ from demand_forecasting.schemas import DemandSeries, EvalResult, ForecastPoint, 
 
 
 def wape(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """Weighted absolute percentage error: sum(|error|) / sum(|actual|).
+    Scale-independent (unlike RMSE), so it's the metric used to compare
+    tiers across series of very different volume. NaN if actuals sum to
+    zero — reported as-is rather than silently swallowed."""
     denom = np.sum(np.abs(y_true))
     if denom == 0:
         return float("nan")
@@ -47,11 +51,17 @@ def wape(y_true: np.ndarray, y_pred: np.ndarray) -> float:
 
 
 def rmse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """Root mean squared error — reported alongside WAPE since it
+    penalizes large individual misses more than WAPE does."""
     return float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
 
 
 @dataclass
 class FoldSpec:
+    """One rolling-origin fold: train on data through train_end, score the
+    forecast for horizon_dates. spans_covid flags whether any date in
+    horizon_dates falls inside the configured COVID stress-test window."""
+
     fold_id: int
     train_end: date
     horizon_dates: list[date]
@@ -60,12 +70,15 @@ class FoldSpec:
 
 @dataclass
 class EvalReport:
+    """Flat list of EvalResult produced by one run_backtest call."""
+
     results: list[EvalResult] = field(default_factory=list)
 
     def summary(self) -> str:
         return "\n".join(f"[{r.dimension}] {r.detail}" for r in self.results)
 
     def to_records(self) -> list[dict]:
+        """JSON-serializable records — what write_report writes to disk."""
         return [r.model_dump(mode="json") for r in self.results]
 
 
@@ -101,11 +114,14 @@ def generate_folds(
 
 
 def _to_forecast_result(series: DemandSeries, model_name: str, dates: list[date], values: np.ndarray) -> ForecastResult:
+    """Package a tier's raw forecast array into the typed ForecastResult."""
     points = [ForecastPoint(week_start=d, point_forecast=float(v)) for d, v in zip(dates, values)]
     return ForecastResult(series_id=series.series_id, model_name=model_name, points=points)
 
 
 def _actual_lookup(series_list: list[DemandSeries]) -> dict[tuple[str, str], float]:
+    """(series_id, isoformat week_start) -> observed bottles_sold, built
+    once per backtest so every fold/tier can look up ground truth in O(1)."""
     return {(s.series_id, o.week_start.isoformat()): o.bottles_sold for s in series_list for o in s.observations}
 
 
@@ -115,6 +131,10 @@ def _score_tier(
     fold: FoldSpec,
     actual_lookup: dict[tuple[str, str], float],
 ) -> list[EvalResult]:
+    """WAPE + RMSE for one tier's forecasts in one fold, pooled across
+    every series and every horizon step. Returns [] if none of the
+    forecasted points have a known actual (shouldn't happen in practice,
+    but is safer than dividing by zero)."""
     y_true, y_pred = [], []
     for fc in forecasts:
         for p in fc.points:
@@ -162,6 +182,10 @@ def run_backtest(
     seasonal_period_weeks: int = 52,
     lgb_params: dict | None = None,
 ) -> EvalReport:
+    """Run the full rolling-origin backtest: generate folds, forecast every
+    tier for every fold, score point accuracy per tier and conformal
+    interval coverage for the global tier, and return the flat report. See
+    module docstring for what each dimension checks and why."""
     folds = generate_folds(series_list, horizon_weeks, n_folds, step_weeks, covid_start, covid_end)
     actual_lookup = _actual_lookup(series_list)
     results: list[EvalResult] = []
@@ -290,6 +314,7 @@ def _score_conformal_coverage(
 
 
 def write_report(report: EvalReport, out_dir: str | Path) -> Path:
+    """Write report as timestamped JSON under out_dir and return the path."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")

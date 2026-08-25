@@ -18,6 +18,8 @@ cordial_liqueur) — a single pooled quantile would be too wide for
 low-volume categories and too narrow for high-volume ones. A group with
 too few calibration points falls back to the global quantile rather than
 overfitting an unstable per-group interval width.
+
+Author: Anastasiia Bakhtoiarova
 """
 from __future__ import annotations
 
@@ -30,6 +32,9 @@ from demand_forecasting.schemas import ConformalInterval, ForecastResult
 
 
 def _conformal_quantile(abs_residuals: np.ndarray, alpha: float) -> float:
+    """The finite-sample-corrected (1 - alpha) quantile of absolute
+    residuals that split conformal prediction adds/subtracts from a point
+    forecast to get (very close to) the target marginal coverage."""
     n = len(abs_residuals)
     if n == 0:
         raise ValueError("cannot calibrate a conformal quantile from zero residuals")
@@ -39,6 +44,11 @@ def _conformal_quantile(abs_residuals: np.ndarray, alpha: float) -> float:
 
 @dataclass
 class ConformalCalibrator:
+    """Calibrates a nonconformity quantile from held-out residuals
+    (`calibrate`), then wraps point forecasts in intervals with that
+    quantile's width (`interval` / `wrap`). See module docstring for why
+    calibration is grouped by liquor_type rather than pooled globally."""
+
     alpha: float
     min_group_size: int = 20
     group_q_hat: dict[str, float] = field(default_factory=dict)
@@ -58,12 +68,17 @@ class ConformalCalibrator:
                     self.group_q_hat[group] = _conformal_quantile(sub_abs, self.alpha)
 
     def interval(self, point_forecast: float, group: str | None = None) -> tuple[float, float]:
+        """(lower, upper) around point_forecast, using group's calibrated
+        quantile if it has one, else the global fallback quantile. Lower is
+        clipped to zero — bottle counts can't be negative."""
         if self.fallback_q_hat is None:
             raise RuntimeError("ConformalCalibrator must be calibrated before producing intervals")
         q = self.group_q_hat.get(group, self.fallback_q_hat) if group is not None else self.fallback_q_hat
         return max(point_forecast - q, 0.0), point_forecast + q
 
     def wrap(self, forecast: ForecastResult, liquor_type: str | None = None) -> list[ConformalInterval]:
+        """Apply `interval` to every point in a ForecastResult, returning
+        one ConformalInterval per forecasted week."""
         intervals = []
         for point in forecast.points:
             lower, upper = self.interval(point.point_forecast, group=liquor_type)
