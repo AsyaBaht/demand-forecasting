@@ -89,6 +89,21 @@ def major_holidays(years: range) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def holiday_month_starts(years: range) -> pd.DatetimeIndex:
+    """The distinct calendar months (as month-start Timestamps) containing
+    at least one major holiday — used for is_holiday_month / holiday-
+    adjacency features at monthly grain."""
+    holidays = major_holidays(years)
+    return pd.DatetimeIndex(sorted(pd.Timestamp(d).replace(day=1) for d in holidays["date"])).unique()
+
+
+def holidays_per_month(years: range) -> pd.Series:
+    """Count of major holidays falling in each calendar month, indexed by
+    a monthly Period — used for the n_holidays_in_month feature."""
+    holidays = major_holidays(years)
+    return holidays.groupby(pd.PeriodIndex(holidays["date"], freq="M")).size()
+
+
 def load_weekly_frame(path: Path | None = None) -> pd.DataFrame:
     """The processed weekly (store, liquor_type) frame, as written by
     demand_forecasting.ingestion.aggregate.save_processed."""
