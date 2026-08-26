@@ -4,6 +4,9 @@ __pycache__/
 .venv/
 .idea
 
+# local prompt notes/drafts — not part of the project
+prompt/
+
 # data lake tiers — regenerable from BigQuery, not versioned.
 # .gitkeep files keep the directory structure tracked.
 data/raw/*
