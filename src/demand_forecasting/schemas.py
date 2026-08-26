@@ -12,14 +12,20 @@ from __future__ import annotations
 from datetime import date
 
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 
 class DemandObservation(BaseModel):
-    """One observed (or gap-filled zero) week of bottles sold."""
+    """One observed (or gap-filled zero) week of bottles sold. Can be
+    negative: a handful of real weeks in the Iowa dataset have returns
+    exceeding that week's sales (see scripts/eda_raw_demand.py's data
+    quality section) — a real observation, not invalid data, so it isn't
+    clipped here. Forecasts, not observations, get clipped to zero at
+    prediction time (see models/*.py, conformal.py) since a model
+    shouldn't plan around negative future demand."""
 
     week_start: date
-    bottles_sold: float = Field(ge=0)
+    bottles_sold: float
 
 
 class DemandSeries(BaseModel):

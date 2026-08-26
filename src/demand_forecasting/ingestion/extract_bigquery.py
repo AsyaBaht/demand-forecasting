@@ -33,6 +33,14 @@ def extract_and_save(project_id: str | None = None, out_path: str | None = None)
     `<out_path or settings.raw_data_dir>/demand_raw.parquet`, returning the
     path written."""
     df = run_extraction(project_id=project_id)
+    # The BigQuery client represents DATE columns using db-dtypes' "dbdate"
+    # pandas extension type, which only reconstructs correctly on read if
+    # `db_dtypes` happens to be imported in that process first. Converting
+    # to a plain datetime64 column here means the parquet file never
+    # embeds that extension type at all, so anything downstream (even a
+    # process with no `bigquery` extra installed) can read it with a
+    # bare `pd.read_parquet`.
+    df["week_start"] = pd.to_datetime(df["week_start"])
     out = Path(out_path or settings.raw_data_dir) / "demand_raw.parquet"
     out.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(out, index=False)

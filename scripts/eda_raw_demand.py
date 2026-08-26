@@ -21,35 +21,25 @@ Author: Anastasiia Bakhtoiarova
 from __future__ import annotations
 
 import argparse
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config.settings import settings
+
+from demand_forecasting.ingestion.aggregate import read_raw_parquet
 
 SECTION_RULE = "=" * 78
 
 
 def load_raw(path: Path) -> pd.DataFrame:
-    """Read the raw extract parquet. BigQuery's DATE columns round-trip
-    through the `db-dtypes` package's "dbdate" pandas extension type, which
-    pandas can't reconstruct unless db-dtypes happens to be imported first —
-    so instead of requiring that (and the rest of the bigquery extra) just
-    to run an EDA script, cast the column to a plain pyarrow date32 and
-    strip the stale pandas metadata that would otherwise try to rebuild it."""
-    table = pq.read_table(path)
-    week_start_idx = table.schema.get_field_index("week_start")
-    if week_start_idx == -1:
-        raise ValueError(f"{path} has no 'week_start' column — is this the raw extract file?")
-    table = table.set_column(week_start_idx, "week_start", table.column("week_start").cast(pa.date32()))
-    table = table.replace_schema_metadata(None)
-
-    df = table.to_pandas()
+    """Read the raw extract parquet and normalize dtypes for EDA. Delegates
+    the actual parquet read to ingestion.aggregate.read_raw_parquet, which
+    handles BigQuery's "dbdate"-typed week_start column without requiring
+    db_dtypes to be installed — see that function's docstring for why."""
+    if path.suffix != ".parquet":
+        raise ValueError(f"{path} doesn't look like a parquet file — is this the raw extract file?")
+    df = read_raw_parquet(path)
     df["week_start"] = pd.to_datetime(df["week_start"])
     df["store_number"] = df["store_number"].astype(int)
     df["liquor_type"] = df["liquor_type"].astype(str)
