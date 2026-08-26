@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import logging
 import warnings
 from datetime import datetime, timezone
@@ -325,6 +326,7 @@ def main() -> None:
     sarimax_order_rows = []
     ridge_weight_rows = []
     importance_frames = []
+    lgb_final_params = {}
 
     for category in categories:
         cat_df = features[features["liquor_type"] == category].sort_values("month_start").reset_index(drop=True)
@@ -354,6 +356,7 @@ def main() -> None:
         test_model = LightGBMCategoryModel(test_model_params).fit(trainval_rows)
         lgb_test = test_model.recursive_forecast(history_trainval, len(test_df), year_min, holiday_years)
         importance_frames.append(importance.rename(category))
+        lgb_final_params[category] = test_model_params
 
         # --- Model 4: SARIMAX ---
         sarimax_val, order, seasonal_order = fit_sarimax_forecast(train_df, val_df[EXOG_COLS].to_numpy(dtype=float), len(val_df))
@@ -453,7 +456,8 @@ def main() -> None:
     predictions.to_parquet(OUT / "predictions.parquet", index=False)
     wape_table.to_csv(OUT / "wape_table.csv", index=False)
     importance_table.to_csv(OUT / "feature_importance_gain.csv")
-    print(f"\nWrote report, predictions.parquet, wape_table.csv to {OUT}")
+    (OUT / "lgb_best_params.json").write_text(json.dumps(lgb_final_params, indent=2))
+    print(f"\nWrote report, predictions.parquet, wape_table.csv, lgb_best_params.json to {OUT}")
 
 
 if __name__ == "__main__":
