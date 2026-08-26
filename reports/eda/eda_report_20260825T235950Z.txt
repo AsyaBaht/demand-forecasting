@@ -1,0 +1,128 @@
+EDA REPORT — data/raw/demand_raw.parquet
+
+generated 2026-08-25T23:59:50+00:00Z
+
+==============================================================================
+
+SCHEMA & COVERAGE
+  rows: 73,482
+  date range: 2018-12-31 to 2026-04-27 (382 weeks)
+  distinct stores: 25
+  liquor types (8): brandy, cordial_liqueur, gin, other, rum, tequila, vodka, whiskey
+  distinct (store, liquor_type) series: 200
+
+==============================================================================
+
+DATA QUALITY
+  null values: none
+  duplicate (store, liquor_type, week) rows: 0
+  zero-bottles-sold rows: 0 (0.00%) — expected to be rare here, since a true zero-sale week produces no row at all in this extract; a zero row means the store recorded a transaction that net to exactly zero bottles.
+  negative bottles_sold rows: 7 (0.010%) — returns/corrections exceeding that week's sales. Real, not a bug: ingestion/aggregate.py does not clip these, so a downstream model can see them.
+  most negative rows:
+    week_start  store_number liquor_type  bottles_sold
+    2023-09-11          3354       other        -228.0
+    2024-02-19          3447       other        -168.0
+    2024-02-26          3420       vodka        -102.0
+    2023-07-10          5144         rum         -78.0
+    2024-03-11          3420         gin         -36.0
+
+==============================================================================
+
+DESCRIPTIVE STATISTICS
+  overall bottles_sold:
+    count    73482.000000
+    mean       495.937944
+    std        767.249195
+    min       -228.000000
+    25%         76.000000
+    50%        246.000000
+    75%        598.000000
+    max      22821.000000
+
+  by liquor_type (sorted by mean):
+                      count    mean     std    min    25%    50%     75%      max
+    liquor_type                                                                  
+    vodka            9293.0  1026.2  1326.7 -102.0  321.0  639.0  1132.0  16844.0
+    whiskey          9449.0   877.1   899.7    1.0  383.0  618.0  1038.0  22821.0
+    cordial_liqueur  9345.0   695.6   692.5    2.0  270.0  450.0   856.0   5395.0
+    rum              9232.0   375.4   430.6  -78.0  102.0  226.0   474.0   6681.0
+    tequila          9297.0   373.5   563.6    1.0   72.0  168.0   396.0   5383.0
+    other            9216.0   373.3   491.2 -228.0  103.0  207.5   453.2   8141.0
+    gin              8798.0   122.5   152.9  -36.0   36.0   72.0   138.8   2364.0
+    brandy           8852.0    74.9   112.9    1.0   24.0   44.0    76.0   1976.0
+
+==============================================================================
+
+OUTLIERS (Tukey fence, 1.5x IQR, per liquor_type)
+  total flagged: 6,869 of 73,482 rows (9.35%)
+  by liquor_type:
+    liquor_type
+    tequila            983
+    vodka              980
+    gin                967
+    whiskey            880
+    cordial_liqueur    801
+    rum                776
+    brandy             768
+    other              714
+  10 most extreme outlier rows:
+    week_start  store_number liquor_type  bottles_sold
+    2021-10-04          2663     whiskey       22821.0
+    2020-09-28          2663     whiskey       21300.0
+    2024-10-21          2633       vodka       16844.0
+    2019-09-23          2663     whiskey       16772.0
+    2024-04-29          2633       vodka       16660.0
+    2021-04-19          2633       vodka       16438.0
+    2025-04-21          2633       vodka       16428.0
+    2023-04-24          2633       vodka       16330.0
+    2022-01-03          2633       vodka       15987.0
+    2023-10-30          2633       vodka       15869.0
+
+==============================================================================
+
+MONTHLY VIEW
+  89 calendar months, total bottles_sold 36,442,512
+  highest-volume months:
+    month
+    2022-10    641493.0
+    2022-08    562890.0
+    2023-10    561440.0
+    Freq: M
+  lowest-volume months:
+    month
+    2018-12     33232.0
+    2020-04    231176.0
+    2020-05    265421.0
+    Freq: M
+  largest month-over-month % swings (up or down):
+    month
+    2019-01    705.2
+    2020-06     79.4
+    2022-10     65.1
+    2022-08     49.7
+    2019-04     48.1
+    Freq: M
+  NOTE: partial calendar-month buckets detected (fewer than half a typical month's weeks) — a week-boundary artifact of Monday-truncation at the start/end of the extraction range, not a real demand signal. Discount these before reading the highest/lowest lists above:
+    month
+    2018-12    1
+    Freq: M
+
+==============================================================================
+
+STORE CONCENTRATION
+  top 5 of 25 stores hold 43.6% of total volume:
+                  bottles_sold  share
+    store_number                     
+    2633             5098536.0  0.140
+    4829             4869070.0  0.134
+    2512             2581976.0  0.071
+    3773             1699492.0  0.047
+    5102             1647827.0  0.045
+
+==============================================================================
+
+SERIES COMPLETENESS
+  200 (store, liquor_type) series
+  calendar span (weeks): min=321, median=383, max=383
+  fill rate (observed / calendar span): min=0.27, median=0.99
+  series shorter than min_series_length_weeks (26): 0 — these would be dropped by ingestion/aggregate.raw_to_series.
