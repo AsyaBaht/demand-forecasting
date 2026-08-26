@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 bigquery = ["google-cloud-bigquery>=3.11", "db-dtypes>=1.2"]
+eda = ["matplotlib>=3.8"]
 dev = ["pytest>=8.0", "ruff>=0.4"]
 
 [project.scripts]

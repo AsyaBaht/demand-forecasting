@@ -81,10 +81,17 @@ class Settings(BaseSettings):
     covid_window_start: date = date(2020, 3, 1)
     covid_window_end: date = date(2020, 12, 31)
 
+    # --- outlier detection (EDA) ---
+    # IQR multiplier for flagging outliers within each liquor_type group —
+    # 1.5x is the standard Tukey fence; grouped by liquor_type because
+    # bottles-sold scale varies enormously across categories.
+    outlier_iqr_multiplier: float = 1.5
+
     # --- paths ---
     raw_data_dir: str = "data/raw"
     processed_data_dir: str = "data/processed"
     eval_reports_dir: str = "reports/eval_runs"
+    eda_reports_dir: str = "reports/eda"
     sql_path: str = "sql/extract_demand.sql"
 
 

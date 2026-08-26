@@ -20,9 +20,11 @@ dist/
 .pytest_cache/
 .ruff_cache/
 
-# eval reports are regenerable via the eval CLI, not versioned — keep the dir.
+# eval and EDA reports are regenerable, not versioned — keep the dirs.
 reports/eval_runs/*
+reports/eda/*
 !reports/eval_runs/.gitkeep
+!reports/eda/.gitkeep
 
 # GCP credential files — never belong in the repo
 *-key.json
