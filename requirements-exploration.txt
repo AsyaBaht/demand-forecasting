@@ -1,0 +1,11 @@
+# Needed only for the exploration/ scripts (a separate, standalone
+# monthly/category-level forecasting track — see exploration/common.py).
+# Mirrors the [project.optional-dependencies.exploration] table in
+# pyproject.toml. Not needed to run the production CLI or test suite.
+#
+# Install: pip install -r requirements.txt -r requirements-exploration.txt
+# Equivalent to: pip install -e ".[exploration]"
+matplotlib==3.11.1
+prophet==1.4.0
+optuna==4.9.0
+pmdarima==2.1.1
