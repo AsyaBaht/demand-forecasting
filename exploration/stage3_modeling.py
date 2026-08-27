@@ -71,10 +71,13 @@ from common import (
     holidays_per_month,
     major_holidays,
 )
+from pipeline_config import ENSEMBLE_INPUTS, PipelineConfig
 from pmdarima.arima import ARIMA as PmdARIMA
 from prophet import Prophet
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
+
+MODEL_ORDER = ["naive", "prophet", "lightgbm", "sarimax", "ensemble"]
 
 from demand_forecasting.evaluation.eval_suite import rmse, wape
 from demand_forecasting.models.baselines import seasonal_naive_forecast
@@ -311,15 +314,29 @@ def fit_ridge_ensemble_loo(X_val: np.ndarray, y_val: np.ndarray) -> tuple[Ridge,
     return final_model, scaler, best_alpha
 
 
-def main() -> None:
+def main(config: PipelineConfig | None = None) -> None:
+    config = config or PipelineConfig()
+    enabled = set(config.models)
     OUT.mkdir(parents=True, exist_ok=True)
     features = pd.read_parquet(IN_DIR / "processed_features.parquet")
-    categories = sorted(features["liquor_type"].unique())
+
+    available_categories = set(features["liquor_type"].unique())
+    if config.categories is not None:
+        unknown = set(config.categories) - available_categories
+        if unknown:
+            raise ValueError(f"unknown categor{'y' if len(unknown) == 1 else 'ies'} in config: {sorted(unknown)} — available: {sorted(available_categories)}")
+        categories = sorted(config.categories)
+    else:
+        categories = sorted(available_categories)
+
     year_min = features["month_start"].dt.year.min()
     holiday_years = range(year_min, features["month_start"].dt.year.max() + 2)
-    holiday_df = build_prophet_holidays(holiday_years)
+    holiday_df = build_prophet_holidays(holiday_years) if "prophet" in enabled else None
 
     report = [f"STAGE 3 MODELING REPORT — {datetime.now(tz=timezone.utc).date().isoformat()}", "=" * 78]
+    report.append(f"Models enabled: {sorted(enabled)}. Categories: {categories}.")
+    report.append("=" * 78)
+
     all_predictions = []
     wape_rows = []
     prophet_params_rows = []
@@ -327,6 +344,9 @@ def main() -> None:
     ridge_weight_rows = []
     importance_frames = []
     lgb_final_params = {}
+    prophet_final_params = {}
+    sarimax_final_orders = {}
+    ridge_final = {}
 
     for category in categories:
         cat_df = features[features["liquor_type"] == category].sort_values("month_start").reset_index(drop=True)
@@ -340,57 +360,82 @@ def main() -> None:
         history_train = train_df.set_index("month_start")["units_sold"]
         history_trainval = trainval_df.set_index("month_start")["units_sold"]
 
+        val_forecasts: dict[str, np.ndarray] = {}
+        test_forecasts: dict[str, np.ndarray] = {}
+
         # --- Model 1: naive seasonal ---
-        naive_val = naive_seasonal(history_train, len(val_df))
-        naive_test = naive_seasonal(history_trainval, len(test_df))
+        if "naive" in enabled:
+            val_forecasts["naive"] = naive_seasonal(history_train, len(val_df))
+            test_forecasts["naive"] = naive_seasonal(history_trainval, len(test_df))
 
         # --- Model 2: Prophet ---
-        cps, sps, prophet_val, prophet_val_wape = tune_prophet(train_df, val_actual, holiday_df)
-        prophet_test = fit_prophet_forecast(trainval_df, len(test_df), cps, sps, holiday_df)
-        prophet_params_rows.append({"liquor_type": category, "changepoint_prior_scale": cps, "seasonality_prior_scale": sps, "val_wape": prophet_val_wape})
+        if "prophet" in enabled:
+            cps, sps, prophet_val, prophet_val_wape = tune_prophet(train_df, val_actual, holiday_df)
+            prophet_test = fit_prophet_forecast(trainval_df, len(test_df), cps, sps, holiday_df)
+            val_forecasts["prophet"] = prophet_val
+            test_forecasts["prophet"] = prophet_test
+            prophet_params_rows.append({"liquor_type": category, "changepoint_prior_scale": cps, "seasonality_prior_scale": sps, "val_wape": prophet_val_wape})
+            prophet_final_params[category] = {"changepoint_prior_scale": cps, "seasonality_prior_scale": sps}
 
         # --- Model 3: LightGBM ---
-        best_lgb_params, lgb_val, best_iter, importance = tune_lightgbm(cat_df, val_actual, year_min, holiday_years)
-        trainval_rows = cat_df[cat_df["split"].isin(["train", "validation"]) & cat_df["lag_1"].notna()]
-        test_model_params = {**best_lgb_params, "n_estimators": best_iter}
-        test_model = LightGBMCategoryModel(test_model_params).fit(trainval_rows)
-        lgb_test = test_model.recursive_forecast(history_trainval, len(test_df), year_min, holiday_years)
-        importance_frames.append(importance.rename(category))
-        lgb_final_params[category] = test_model_params
+        if "lightgbm" in enabled:
+            best_lgb_params, lgb_val, best_iter, importance = tune_lightgbm(cat_df, val_actual, year_min, holiday_years)
+            trainval_rows = cat_df[cat_df["split"].isin(["train", "validation"]) & cat_df["lag_1"].notna()]
+            test_model_params = {**best_lgb_params, "n_estimators": best_iter}
+            test_model = LightGBMCategoryModel(test_model_params).fit(trainval_rows)
+            lgb_test = test_model.recursive_forecast(history_trainval, len(test_df), year_min, holiday_years)
+            val_forecasts["lightgbm"] = lgb_val
+            test_forecasts["lightgbm"] = lgb_test
+            importance_frames.append(importance.rename(category))
+            lgb_final_params[category] = test_model_params
 
         # --- Model 4: SARIMAX ---
-        sarimax_val, order, seasonal_order = fit_sarimax_forecast(train_df, val_df[EXOG_COLS].to_numpy(dtype=float), len(val_df))
-        sarimax_test = refit_sarimax_forecast(order, seasonal_order, trainval_df, test_df[EXOG_COLS].to_numpy(dtype=float), len(test_df))
-        sarimax_order_rows.append({"liquor_type": category, "order": str(order), "seasonal_order": str(seasonal_order)})
+        if "sarimax" in enabled:
+            sarimax_val, order, seasonal_order = fit_sarimax_forecast(train_df, val_df[EXOG_COLS].to_numpy(dtype=float), len(val_df))
+            sarimax_test = refit_sarimax_forecast(order, seasonal_order, trainval_df, test_df[EXOG_COLS].to_numpy(dtype=float), len(test_df))
+            val_forecasts["sarimax"] = sarimax_val
+            test_forecasts["sarimax"] = sarimax_test
+            sarimax_order_rows.append({"liquor_type": category, "order": str(order), "seasonal_order": str(seasonal_order)})
+            sarimax_final_orders[category] = {"order": list(order), "seasonal_order": list(seasonal_order)}
 
-        # --- Model 5: Ridge ensemble ---
-        X_val = np.column_stack([prophet_val, lgb_val, sarimax_val])
-        ridge, ridge_scaler, ridge_alpha = fit_ridge_ensemble_loo(X_val, val_actual)
-        X_test = np.column_stack([prophet_test, lgb_test, sarimax_test])
-        ensemble_test = np.clip(ridge.predict(ridge_scaler.transform(X_test)), 0, None)
-        ensemble_val_fitted = np.clip(ridge.predict(ridge_scaler.transform(X_val)), 0, None)  # in-sample, context only
-        # Ridge was fit on standardized inputs (see fit_ridge_ensemble_loo); convert
-        # coef_/intercept_ back to original-scale weights so they're interpretable
-        # as "contribution per bottle of that model's raw prediction."
-        raw_weights = ridge.coef_ / ridge_scaler.scale_
-        raw_intercept = ridge.intercept_ - np.sum(ridge.coef_ * ridge_scaler.mean_ / ridge_scaler.scale_)
-        ridge_weight_rows.append(
-            {
-                "liquor_type": category,
-                "alpha": ridge_alpha,
-                "w_prophet": raw_weights[0],
-                "w_lightgbm": raw_weights[1],
-                "w_sarimax": raw_weights[2],
-                "intercept": raw_intercept,
+        # --- Model 5: Ridge ensemble, stacking whichever of prophet/lightgbm/sarimax are enabled ---
+        if "ensemble" in enabled:
+            ensemble_inputs = [m for m in ENSEMBLE_INPUTS if m in enabled]  # config validation guarantees len>=2
+            X_val = np.column_stack([val_forecasts[m] for m in ensemble_inputs])
+            X_test = np.column_stack([test_forecasts[m] for m in ensemble_inputs])
+            ridge, ridge_scaler, ridge_alpha = fit_ridge_ensemble_loo(X_val, val_actual)
+            ensemble_test = np.clip(ridge.predict(ridge_scaler.transform(X_test)), 0, None)
+            ensemble_val_fitted = np.clip(ridge.predict(ridge_scaler.transform(X_val)), 0, None)  # in-sample, context only
+            val_forecasts["ensemble"] = ensemble_val_fitted
+            test_forecasts["ensemble"] = ensemble_test
+            # Ridge was fit on standardized inputs (see fit_ridge_ensemble_loo); convert
+            # coef_/intercept_ back to original-scale weights so they're interpretable
+            # as "contribution per bottle of that model's raw prediction."
+            raw_weights = ridge.coef_ / ridge_scaler.scale_
+            raw_intercept = ridge.intercept_ - np.sum(ridge.coef_ * ridge_scaler.mean_ / ridge_scaler.scale_)
+            ridge_weight_rows.append(
+                {
+                    "liquor_type": category,
+                    "alpha": ridge_alpha,
+                    "inputs": "+".join(ensemble_inputs),
+                    **{f"w_{m}": w for m, w in zip(ensemble_inputs, raw_weights)},
+                    "intercept": raw_intercept,
+                }
+            )
+            ridge_final[category] = {
+                "inputs": ensemble_inputs,
+                "scaler_mean": ridge_scaler.mean_.tolist(),
+                "scaler_scale": ridge_scaler.scale_.tolist(),
+                "coef": ridge.coef_.tolist(),
+                "intercept": float(ridge.intercept_),
             }
-        )
 
         # --- collect predictions ---
-        for split_name, dates, actual, models in (
-            ("validation", val_df["month_start"], val_actual, {"naive": naive_val, "prophet": prophet_val, "lightgbm": lgb_val, "sarimax": sarimax_val, "ensemble": ensemble_val_fitted}),
-            ("test", test_df["month_start"], test_actual, {"naive": naive_test, "prophet": prophet_test, "lightgbm": lgb_test, "sarimax": sarimax_test, "ensemble": ensemble_test}),
+        for split_name, dates, actual, forecasts in (
+            ("validation", val_df["month_start"], val_actual, val_forecasts),
+            ("test", test_df["month_start"], test_actual, test_forecasts),
         ):
-            for model_name, preds in models.items():
+            for model_name, preds in forecasts.items():
                 for date, act, pred in zip(dates, actual, preds):
                     all_predictions.append({"liquor_type": category, "month_start": date, "split": split_name, "model": model_name, "actual": act, "predicted": pred})
                 w = wape(actual, np.asarray(preds))
@@ -402,24 +447,23 @@ def main() -> None:
     prophet_params = pd.DataFrame(prophet_params_rows)
     sarimax_orders = pd.DataFrame(sarimax_order_rows)
     ridge_weights = pd.DataFrame(ridge_weight_rows)
-    importance_table = pd.concat(importance_frames, axis=1)
+    importance_table = pd.concat(importance_frames, axis=1) if importance_frames else pd.DataFrame()
 
-    val_pivot = wape_table[wape_table["split"] == "validation"].pivot(index="liquor_type", columns="model", values="wape")
-    test_pivot = wape_table[wape_table["split"] == "test"].pivot(index="liquor_type", columns="model", values="wape")
-    model_order = ["naive", "prophet", "lightgbm", "sarimax", "ensemble"]
-    val_pivot = val_pivot[model_order]
-    test_pivot = test_pivot[model_order]
+    model_order = [m for m in MODEL_ORDER if m in enabled]
+    val_pivot = wape_table[wape_table["split"] == "validation"].pivot(index="liquor_type", columns="model", values="wape")[model_order]
+    test_pivot = wape_table[wape_table["split"] == "test"].pivot(index="liquor_type", columns="model", values="wape")[model_order]
 
-    report.append("SECTION 1 — VALIDATION WAPE BY MODEL x CATEGORY (6-month horizon, recursive rollout)")
+    report.append("SECTION 1 — VALIDATION WAPE BY MODEL x CATEGORY (recursive rollout)")
     report.append("")
-    report.append("  NOTE: 'ensemble' here is the Ridge meta-learner's IN-SAMPLE fit to this same")
-    report.append("  validation data (it was trained on exactly these predictions/actuals) — expect it to")
-    report.append("  look artificially strong. The honest ensemble number is the TEST WAPE in Section 2.")
-    report.append("")
+    if "ensemble" in enabled:
+        report.append("  NOTE: 'ensemble' here is the Ridge meta-learner's IN-SAMPLE fit to this same")
+        report.append("  validation data (it was trained on exactly these predictions/actuals) — expect it to")
+        report.append("  look artificially strong. The honest ensemble number is the TEST WAPE in Section 2.")
+        report.append("")
     report.append(_indent(val_pivot.round(3).to_string()))
     report.append("=" * 78)
 
-    report.append("SECTION 2 — TEST WAPE BY MODEL x CATEGORY (12-month holdout, genuinely out-of-sample)")
+    report.append("SECTION 2 — TEST WAPE BY MODEL x CATEGORY (holdout, genuinely out-of-sample)")
     report.append("")
     report.append(_indent(test_pivot.round(3).to_string()))
     report.append("")
@@ -430,24 +474,27 @@ def main() -> None:
 
     report.append("SECTION 3 — PROPHET: TUNED HYPERPARAMETERS (grid search on validation WAPE)")
     report.append("")
-    report.append(_indent(prophet_params.round(4).to_string(index=False)))
+    report.append(_indent(prophet_params.round(4).to_string(index=False)) if "prophet" in enabled else "  Skipped — 'prophet' not in config.models.")
     report.append("=" * 78)
 
     report.append("SECTION 4 — SARIMAX: AUTO_ARIMA-SELECTED ORDERS")
     report.append("")
-    report.append(_indent(sarimax_orders.to_string(index=False)))
+    report.append(_indent(sarimax_orders.to_string(index=False)) if "sarimax" in enabled else "  Skipped — 'sarimax' not in config.models.")
     report.append("=" * 78)
 
     report.append("SECTION 5 — LIGHTGBM: TOP-5 FEATURE IMPORTANCE (gain-based) BY CATEGORY")
     report.append("")
-    report.append("  Full gain-based importance for every feature x category saved to feature_importance_gain.csv.")
-    top5 = pd.DataFrame({cat: importance_table[cat].sort_values(ascending=False).head(5).index for cat in categories})
-    report.append(_indent(top5.to_string(index=False)))
+    if "lightgbm" in enabled:
+        report.append("  Full gain-based importance for every feature x category saved to feature_importance_gain.csv.")
+        top5 = pd.DataFrame({cat: importance_table[cat].sort_values(ascending=False).head(5).index for cat in categories})
+        report.append(_indent(top5.to_string(index=False)))
+    else:
+        report.append("  Skipped — 'lightgbm' not in config.models.")
     report.append("=" * 78)
 
-    report.append("SECTION 6 — RIDGE ENSEMBLE WEIGHTS (alpha chosen by leave-one-out over the 6 validation points)")
+    report.append("SECTION 6 — RIDGE ENSEMBLE WEIGHTS (alpha chosen by leave-one-out over the validation points)")
     report.append("")
-    report.append(_indent(ridge_weights.round(3).to_string(index=False)))
+    report.append(_indent(ridge_weights.round(3).to_string(index=False)) if "ensemble" in enabled else "  Skipped — 'ensemble' not in config.models.")
 
     full_report = "\n\n".join(report)
     print(full_report)
@@ -457,7 +504,10 @@ def main() -> None:
     wape_table.to_csv(OUT / "wape_table.csv", index=False)
     importance_table.to_csv(OUT / "feature_importance_gain.csv")
     (OUT / "lgb_best_params.json").write_text(json.dumps(lgb_final_params, indent=2))
-    print(f"\nWrote report, predictions.parquet, wape_table.csv, lgb_best_params.json to {OUT}")
+    (OUT / "prophet_params.json").write_text(json.dumps(prophet_final_params, indent=2))
+    (OUT / "sarimax_orders.json").write_text(json.dumps(sarimax_final_orders, indent=2))
+    (OUT / "ridge_ensemble.json").write_text(json.dumps(ridge_final, indent=2))
+    print(f"\nWrote report, predictions.parquet, wape_table.csv, and per-model param JSON files to {OUT}")
 
 
 if __name__ == "__main__":

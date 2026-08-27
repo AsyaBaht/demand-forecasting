@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 from common import OUTPUT_ROOT, holidays_per_month
 from mapie.regression import SplitConformalRegressor
+from pipeline_config import PipelineConfig
 from scipy import stats
 from sklearn.base import BaseEstimator, RegressorMixin
 
@@ -34,7 +35,7 @@ warnings.filterwarnings("ignore", message="Estimator does not appear fitted")
 
 IN_DIR = OUTPUT_ROOT / "stage3_modeling"
 OUT = OUTPUT_ROOT / "stage4_evaluation"
-MODEL_ORDER = ["naive", "prophet", "lightgbm", "sarimax", "ensemble"]
+CANONICAL_MODEL_ORDER = ["naive", "prophet", "lightgbm", "sarimax", "ensemble"]
 # 95% is requested by the original spec but not statistically achievable here: split
 # conformal needs at least 1/(1-confidence_level) calibration points, and each category
 # has only 6 (the validation split). 1/(1-0.95)=20 > 6, so MAPIE correctly refuses it;
@@ -81,7 +82,7 @@ class FrozenForecaster(BaseEstimator, RegressorMixin):
         return np.array([self.lookup[int(row[0])] for row in X])
 
 
-def section_1_model_comparison(test: pd.DataFrame) -> tuple[str, pd.DataFrame]:
+def section_1_model_comparison(test: pd.DataFrame, model_order: list[str]) -> tuple[str, pd.DataFrame]:
     rows = []
     for (category, model), group in test.groupby(["liquor_type", "model"]):
         y_true, y_pred = group["actual"].to_numpy(), group["predicted"].to_numpy()
@@ -97,7 +98,7 @@ def section_1_model_comparison(test: pd.DataFrame) -> tuple[str, pd.DataFrame]:
             }
         )
     metrics = pd.DataFrame(rows)
-    wape_pivot = metrics.pivot(index="liquor_type", columns="model", values="WAPE")[MODEL_ORDER]
+    wape_pivot = metrics.pivot(index="liquor_type", columns="model", values="WAPE")[model_order]
     champion = wape_pivot.idxmin(axis=1)
     champion_wape = wape_pivot.min(axis=1)
 
@@ -117,16 +118,16 @@ def section_1_model_comparison(test: pd.DataFrame) -> tuple[str, pd.DataFrame]:
     return "\n".join(lines), metrics.assign(is_champion=lambda d: d.apply(lambda r: champion[r["liquor_type"]] == r["model"], axis=1))
 
 
-def section_2_forecast_plots(test: pd.DataFrame) -> str:
+def section_2_forecast_plots(test: pd.DataFrame, model_order: list[str]) -> str:
     categories = sorted(test["liquor_type"].unique())
     fig, axes = plt.subplots(4, 2, figsize=(15, 16), sharex=False)
     for ax, category in zip(axes.flat, categories):
         cat_test = test[test["liquor_type"] == category].sort_values("month_start")
-        actual = cat_test[cat_test["model"] == "naive"][["month_start", "actual"]].drop_duplicates()
+        actual = cat_test[["month_start", "actual"]].drop_duplicates()  # same regardless of which model's rows they came from
         ax.fill_between(actual["month_start"], actual["actual"] * 0.8, actual["actual"] * 1.2, color="grey", alpha=0.15, label="+/-20%")
         ax.fill_between(actual["month_start"], actual["actual"] * 0.9, actual["actual"] * 1.1, color="grey", alpha=0.25, label="+/-10%")
         ax.plot(actual["month_start"], actual["actual"], color="black", linewidth=2, label="actual")
-        for model in MODEL_ORDER:
+        for model in model_order:
             sub = cat_test[cat_test["model"] == model].sort_values("month_start")
             ax.plot(sub["month_start"], sub["predicted"], marker="o", markersize=3, label=model, alpha=0.8)
         ax.set_title(category)
@@ -213,23 +214,40 @@ def section_3_residual_analysis(test: pd.DataFrame, champion_by_category: pd.Ser
     return "\n".join(lines), residuals
 
 
+def _horizon_bucket_edges(n_months: int) -> tuple[list[int], list[str]]:
+    """3 near/mid/long-term buckets, sized to whatever the test window
+    actually is. Preserves the exact original months_1-3/4-6/7-12 labels
+    at the default 12-month window; generalizes (as evenly as an integer
+    split allows) for any other configured test_months."""
+    if n_months == 12:
+        return [0, 3, 6, 12], ["months_1-3", "months_4-6", "months_7-12"]
+    if n_months < 3:
+        return [0, n_months], [f"months_1-{n_months}"]
+    third = n_months // 3
+    edges = [0, third, 2 * third, n_months]
+    labels = [f"months_1-{third}", f"months_{third + 1}-{2 * third}", f"months_{2 * third + 1}-{n_months}"]
+    return edges, labels
+
+
 def section_4_error_by_horizon(test: pd.DataFrame) -> tuple[str, pd.DataFrame]:
     df = test.copy()
     df["horizon_month"] = df.groupby(["liquor_type", "model"])["month_start"].rank(method="first").astype(int)
-    df["horizon_bucket"] = pd.cut(df["horizon_month"], bins=[0, 3, 6, 12], labels=["months_1-3", "months_4-6", "months_7-12"])
+    n_months = int(df["horizon_month"].max())
+    edges, labels = _horizon_bucket_edges(n_months)
+    df["horizon_bucket"] = pd.cut(df["horizon_month"], bins=edges, labels=labels)
 
     rows = []
     for (category, model, bucket), group in df.groupby(["liquor_type", "model", "horizon_bucket"], observed=True):
         rows.append({"liquor_type": category, "model": model, "horizon_bucket": bucket, "wape": wape(group["actual"].to_numpy(), group["predicted"].to_numpy())})
     horizon_wape = pd.DataFrame(rows)
-    pivot = horizon_wape.pivot_table(index=["liquor_type", "model"], columns="horizon_bucket", values="wape", observed=True)[["months_1-3", "months_4-6", "months_7-12"]]
+    pivot = horizon_wape.pivot_table(index=["liquor_type", "model"], columns="horizon_bucket", values="wape", observed=True)[labels]
 
-    avg_by_bucket_model = horizon_wape.groupby(["model", "horizon_bucket"], observed=True)["wape"].mean().unstack()[["months_1-3", "months_4-6", "months_7-12"]]
+    avg_by_bucket_model = horizon_wape.groupby(["model", "horizon_bucket"], observed=True)["wape"].mean().unstack()[labels]
 
     lines = [
-        "SECTION 4 — ERROR BY FORECAST HORIZON (months 1-3 / 4-6 / 7-12 into the 12-month test window)",
+        f"SECTION 4 — ERROR BY FORECAST HORIZON ({' / '.join(labels)} into the {n_months}-month test window)",
         "",
-        "  Average WAPE by model, across all 8 categories:",
+        f"  Average WAPE by model, across all {test['liquor_type'].nunique()} categories:",
         _indent(avg_by_bucket_model.round(3).to_string()),
         "",
         "  Full breakdown (every model x category):",
@@ -250,6 +268,19 @@ def section_5_mapie_intervals(predictions: pd.DataFrame, champion_by_category: p
         test = cat_preds[cat_preds["split"] == "test"].reset_index(drop=True)
 
         n_val = len(val)
+        needed = int(np.ceil(1 / (1 - CONFIDENCE_LEVELS[0])))
+        if n_val < needed:
+            coverage_rows.append(
+                {
+                    "liquor_type": category,
+                    "champion": model,
+                    "nominal_coverage": CONFIDENCE_LEVELS[0],
+                    "empirical_coverage": float("nan"),
+                    "mean_interval_width": float("nan"),
+                }
+            )
+            continue  # val_months configured smaller than split conformal needs (1/(1-confidence)) for this level
+
         lookup = {i: pred for i, pred in enumerate(pd.concat([val["predicted"], test["predicted"]]).to_numpy())}
         X_calib = np.arange(n_val).reshape(-1, 1)
         X_test = np.arange(n_val, n_val + len(test)).reshape(-1, 1)
@@ -279,26 +310,54 @@ def section_5_mapie_intervals(predictions: pd.DataFrame, champion_by_category: p
     coverage_pivot = coverage.pivot(index="liquor_type", columns="nominal_coverage", values="empirical_coverage")
     intervals = pd.DataFrame(interval_rows)
 
+    n_val = len(predictions[(predictions["liquor_type"] == categories[0]) & (predictions["split"] == "validation") & (predictions["model"] == champion_by_category[categories[0]])])
+    n_test = len(predictions[(predictions["liquor_type"] == categories[0]) & (predictions["split"] == "test") & (predictions["model"] == champion_by_category[categories[0]])])
+    max_confidence_at_n = 1 - 1 / (n_val + 1) if n_val else 0.0
+    n_full_coverage = int((coverage["empirical_coverage"] == 1.0).sum())
+    level = 0.8 if n_val >= int(np.ceil(1 / 0.2)) else float("nan")
+    quantile_level = np.ceil((n_val + 1) * level) / n_val if n_val and not np.isnan(level) else float("nan")
+
     lines = [
         "SECTION 5 — MAPIE CONFORMAL PREDICTION INTERVALS (champion model per category)",
         "",
-        "  95% requested by spec but DROPPED — not statistically achievable: split conformal needs",
-        "  at least 1/(1-confidence_level) calibration points, and each category has only 6 (the",
-        "  validation split). 1/(1-0.95)=20 > 6 (MAPIE itself refuses this); 1/(1-0.80)=5 <= 6, so 80%",
-        "  is the highest level this calibration set can actually support — reported below instead.",
+        (
+            f"  95% requested by spec but DROPPED — not statistically achievable: split conformal needs "
+            f"at least 1/(1-confidence_level) calibration points, and each category has {n_val} (the "
+            f"validation split, val_months={n_val} in this run). 1/(1-0.95)=20 "
+            f"{'>' if n_val < 20 else '<='} {n_val}"
+            f"{' (MAPIE itself refuses this)' if n_val < 20 else ''}; 1/(1-0.80)=5 "
+            f"{'<=' if n_val >= 5 else '>'} {n_val}, so 80% is "
+            f"{'the highest level this calibration set can actually support' if n_val >= 5 else 'ALSO not achievable — every category is skipped below'}"
+            " — reported below instead of forcing an invalid guarantee."
+        ),
         "",
-        "  Calibrated on that category's 6-month validation residuals, applied to the 12-month test",
-        "  forecasts. n=6 calibration / n=12 test points per category is small — read exact coverage",
-        "  numbers as noisy, not precise.",
+        (
+            f"  Calibrated on that category's {n_val}-month validation residuals, applied to the "
+            f"{n_test}-month test forecasts. n={n_val} calibration / n={n_test} test points per category "
+            f"is small — read exact coverage numbers as noisy, not precise."
+        ),
         "",
-        "  7 of 8 categories show 100% empirical coverage at the 80% nominal level — expected, not a",
-        "  bug: split conformal's finite-sample correction (same formula as the production pipeline's",
-        "  conformal.py) needs ceil((n+1)*confidence_level)/n of the calibration residuals; at n=6 that's",
-        "  ceil(7*0.8)/6 = 1.0 — the interval width is forced to the SINGLE LARGEST of the 6 calibration",
-        "  residuals. That's wide enough to cover nearly anything, which is why coverage is high but the",
-        "  mean_interval_width column below is so large relative to the point forecast — a genuinely",
-        "  informative interval at this level would need many more calibration points than a 6-month",
-        "  validation split can provide.",
+        (
+            f"  All categories skipped above — 80% isn't achievable at n={n_val} calibration points "
+            f"(needs 5), so there's nothing to report on the coverage/width tradeoff at this level."
+            if np.isnan(level)
+            else (
+                f"  {n_full_coverage} of {len(categories)} categories show 100% empirical coverage at the 80% "
+                "nominal level — expected, not a bug, when it happens: split conformal's finite-sample "
+                "correction (same formula as the production pipeline's conformal.py) needs "
+                f"ceil((n+1)*confidence_level)/n of the calibration residuals; at n={n_val} that's "
+                f"ceil({n_val + 1}*0.8)/{n_val} = {quantile_level:.2f}"
+                + (
+                    " — the interval width is forced to the SINGLE LARGEST calibration residual, wide enough "
+                    "to cover nearly anything, which is why coverage runs high but mean_interval_width is so "
+                    f"large relative to the point forecast. A genuinely informative interval at this level "
+                    f"would need more than {n_val} calibration points (max achievable confidence at this n is "
+                    f"~{max_confidence_at_n:.1%})."
+                    if quantile_level >= 1.0
+                    else "."
+                )
+            )
+        ),
         "",
         "  Empirical vs. nominal (80%) coverage:",
         _indent(coverage.round(3).to_string(index=False)),
@@ -309,23 +368,27 @@ def section_5_mapie_intervals(predictions: pd.DataFrame, champion_by_category: p
     return "\n".join(lines), intervals
 
 
-def main() -> None:
+def main(config: PipelineConfig | None = None) -> None:
+    config = config or PipelineConfig()
     OUT.mkdir(parents=True, exist_ok=True)
     predictions = pd.read_parquet(IN_DIR / "predictions.parquet")
     test = predictions[predictions["split"] == "test"].copy()
     test["month_start"] = pd.to_datetime(test["month_start"])
+    model_order = [m for m in CANONICAL_MODEL_ORDER if m in test["model"].unique()]
 
     years = range(test["month_start"].dt.year.min(), test["month_start"].dt.year.max() + 1)
     holiday_counts = holidays_per_month(years)
     holiday_months = set(holiday_counts[holiday_counts > 0].index)
 
     report = [f"STAGE 4 EVALUATION REPORT — {datetime.now(tz=timezone.utc).date().isoformat()}", "=" * 78]
+    report.append(f"Models present: {model_order}. Categories: {sorted(test['liquor_type'].unique())}.")
+    report.append("=" * 78)
 
-    comparison_section, metrics = section_1_model_comparison(test)
+    comparison_section, metrics = section_1_model_comparison(test, model_order)
     report.append(comparison_section)
     report.append("=" * 78)
 
-    plot_section = section_2_forecast_plots(test)
+    plot_section = section_2_forecast_plots(test, model_order)
     report.append(plot_section)
     report.append("=" * 78)
 

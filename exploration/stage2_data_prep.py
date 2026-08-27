@@ -23,6 +23,7 @@ the original weekly-granularity spec, stated plainly:
 
 Usage:
     python exploration/stage2_data_prep.py
+    (or via run_pipeline.py, which passes a PipelineConfig — see pipeline_config.py)
 
 Author: Anastasiia Bakhtoiarova
 """
@@ -33,12 +34,11 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 from common import OUTPUT_ROOT, PANDEMIC_END, PANDEMIC_START, load_monthly_category_frame, major_holidays
+from pipeline_config import PipelineConfig
 from sklearn.preprocessing import RobustScaler
 
 OUT = OUTPUT_ROOT / "stage2_data_prep"
 
-TEST_MONTHS = 12
-VAL_MONTHS = 6
 LAG_MONTHS = [1, 2, 3, 6, 12]
 ROLLING_WINDOWS = [3, 6, 12]
 OUTLIER_WINDOW = 12
@@ -49,16 +49,21 @@ def _indent(text: str, prefix: str = "    ") -> str:
     return "\n".join(prefix + line for line in text.splitlines())
 
 
-def compute_split_boundaries(monthly: pd.DataFrame) -> dict:
+def compute_split_boundaries(monthly: pd.DataFrame, test_months: int, val_months: int) -> dict:
     """Walk-forward split boundaries, identical across categories since
-    they share one calendar: test = last 12 months, validation = the 6
-    months immediately before that ("months 13-18 from end"), train =
-    everything earlier."""
+    they share one calendar: test = last `test_months` months, validation
+    = the `val_months` immediately before that, train = everything
+    earlier."""
     all_months = pd.date_range(monthly["month_start"].min(), monthly["month_start"].max(), freq="MS")
     n = len(all_months)
-    test_start = all_months[n - TEST_MONTHS]
-    val_start = all_months[n - TEST_MONTHS - VAL_MONTHS]
-    train_end = all_months[n - TEST_MONTHS - VAL_MONTHS - 1]
+    if n <= test_months + val_months:
+        raise ValueError(
+            f"only {n} months of data available, but test_months={test_months} + val_months={val_months} "
+            f"= {test_months + val_months} leaves no room for any training data"
+        )
+    test_start = all_months[n - test_months]
+    val_start = all_months[n - test_months - val_months]
+    train_end = all_months[n - test_months - val_months - 1]
     return {
         "full_range": all_months,
         "train_end": train_end,
@@ -66,6 +71,8 @@ def compute_split_boundaries(monthly: pd.DataFrame) -> dict:
         "val_end": test_start - pd.DateOffset(months=1),
         "test_start": test_start,
         "test_end": all_months[-1],
+        "test_months": test_months,
+        "val_months": val_months,
     }
 
 
@@ -282,8 +289,8 @@ def section_4_split(features: pd.DataFrame, boundaries: dict) -> tuple[str, pd.D
         "SECTION 4 — WALK-FORWARD TRAIN/VALIDATION/TEST SPLIT (per category, shared calendar cut points)",
         "",
         f"  train: through {boundaries['train_end'].date()}",
-        f"  validation: {boundaries['val_start'].date()} to {boundaries['val_end'].date()} ({VAL_MONTHS} months)",
-        f"  test (holdout): {boundaries['test_start'].date()} to {boundaries['test_end'].date()} ({TEST_MONTHS} months)",
+        f"  validation: {boundaries['val_start'].date()} to {boundaries['val_end'].date()} ({boundaries['val_months']} months)",
+        f"  test (holdout): {boundaries['test_start'].date()} to {boundaries['test_end'].date()} ({boundaries['test_months']} months)",
         "",
         _indent(counts.to_string()),
     ]
@@ -352,10 +359,17 @@ def section_6_summary(monthly: pd.DataFrame, final: pd.DataFrame, gap_report: st
     return "\n".join(lines)
 
 
-def main() -> None:
+def main(config: PipelineConfig | None = None) -> None:
+    config = config or PipelineConfig()
     OUT.mkdir(parents=True, exist_ok=True)
     monthly = load_monthly_category_frame()
-    boundaries = compute_split_boundaries(monthly)
+    if config.categories is not None:
+        available = set(monthly["liquor_type"].unique())
+        unknown = set(config.categories) - available
+        if unknown:
+            raise ValueError(f"unknown categor{'y' if len(unknown) == 1 else 'ies'} in config: {sorted(unknown)} — available: {sorted(available)}")
+        monthly = monthly[monthly["liquor_type"].isin(config.categories)].reset_index(drop=True)
+    boundaries = compute_split_boundaries(monthly, config.test_months, config.val_months)
 
     report = [f"STAGE 2 DATA PREPARATION REPORT — {datetime.now(tz=timezone.utc).date().isoformat()}", "=" * 78]
 

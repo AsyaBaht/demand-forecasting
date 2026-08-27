@@ -35,6 +35,7 @@ from common import (
     load_weekly_frame,
     major_holidays,
 )
+from pipeline_config import PipelineConfig
 from scipy.cluster.hierarchy import dendrogram, fcluster, linkage
 from scipy.spatial.distance import squareform
 from scipy.stats import pearsonr
@@ -658,10 +659,18 @@ def _indent(text: str, prefix: str = "    ") -> str:
     return "\n".join(prefix + line for line in text.splitlines())
 
 
-def main() -> None:
+def main(config: PipelineConfig | None = None) -> None:
+    config = config or PipelineConfig()
     OUT.mkdir(parents=True, exist_ok=True)
     weekly = load_weekly_frame()
     monthly = load_monthly_category_frame()
+    if config.categories is not None:
+        available = set(monthly["liquor_type"].unique())
+        unknown = set(config.categories) - available
+        if unknown:
+            raise ValueError(f"unknown categor{'y' if len(unknown) == 1 else 'ies'} in config: {sorted(unknown)} — available: {sorted(available)}")
+        weekly = weekly[weekly["liquor_type"].isin(config.categories)].reset_index(drop=True)
+        monthly = monthly[monthly["liquor_type"].isin(config.categories)].reset_index(drop=True)
 
     report = [f"STAGE 1 EDA REPORT — {datetime.now(tz=timezone.utc).date().isoformat()}", "=" * 78]
     report.append(section_1_shape_and_missingness(weekly, monthly))
@@ -684,9 +693,13 @@ def main() -> None:
     corr_section, per_category_r = section_7_correlation_by_category(monthly)
     report.append(corr_section)
     report.append("=" * 78)
-    similarity_section = section_9_cross_category_similarity(monthly, stl_results)
-    report.append(similarity_section)
-    report.append("=" * 78)
+    if monthly["liquor_type"].nunique() >= 2:
+        similarity_section = section_9_cross_category_similarity(monthly, stl_results)
+        report.append(similarity_section)
+        report.append("=" * 78)
+    else:
+        report.append("SECTION 9 — CROSS-CATEGORY SIMILARITY\n\n  Skipped: needs >=2 categories, config selected only 1.")
+        report.append("=" * 78)
 
     summary_section, _table = section_8_summary_table(stl_strengths, per_category_r)
     report.append(summary_section)
