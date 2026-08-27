@@ -23,7 +23,7 @@ the original weekly-granularity spec, stated plainly:
 
 Usage:
     python exploration/stage2_data_prep.py
-    (or via run_pipeline.py, which passes a PipelineConfig — see pipeline_config.py)
+    (or via run_pipeline.py, which passes a PipelineConfig — see that file)
 
 Author: Anastasiia Bakhtoiarova
 """
@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 from common import OUTPUT_ROOT, PANDEMIC_END, PANDEMIC_START, load_monthly_category_frame, major_holidays
-from pipeline_config import PipelineConfig
+from run_pipeline import PipelineConfig
 from sklearn.preprocessing import RobustScaler
 
 OUT = OUTPUT_ROOT / "stage2_data_prep"

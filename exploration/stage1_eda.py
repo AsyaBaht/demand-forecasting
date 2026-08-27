@@ -35,7 +35,7 @@ from common import (
     load_weekly_frame,
     major_holidays,
 )
-from pipeline_config import PipelineConfig
+from run_pipeline import PipelineConfig
 from scipy.cluster.hierarchy import dendrogram, fcluster, linkage
 from scipy.spatial.distance import squareform
 from scipy.stats import pearsonr

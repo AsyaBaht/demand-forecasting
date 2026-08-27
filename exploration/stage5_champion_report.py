@@ -9,7 +9,7 @@ observed month — real future, not a backtest window with known answers.
 
 Genuine refit is implemented for all 5 model types, not just whichever
 happened to win in one particular run — a user-configured `models` list
-(see pipeline_config.py) can make any of naive/prophet/lightgbm/sarimax/
+(see run_pipeline.py) can make any of naive/prophet/lightgbm/sarimax/
 ensemble the champion for any category, and this stage has to be able to
 produce a real forecast for whichever one shows up. Prophet/SARIMAX/
 ensemble reuse the hyperparameters Stage 3 already tuned (persisted to
@@ -37,7 +37,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from common import OUTPUT_ROOT, PANDEMIC_END, PANDEMIC_START, holidays_per_month
-from pipeline_config import PipelineConfig
+from run_pipeline import PipelineConfig
 from scipy.stats import spearmanr
 from stage3_modeling import (
     EXOG_COLS,

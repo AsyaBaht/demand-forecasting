@@ -71,13 +71,11 @@ from common import (
     holidays_per_month,
     major_holidays,
 )
-from pipeline_config import ENSEMBLE_INPUTS, PipelineConfig
 from pmdarima.arima import ARIMA as PmdARIMA
 from prophet import Prophet
+from run_pipeline import ENSEMBLE_INPUTS, PipelineConfig
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
-
-MODEL_ORDER = ["naive", "prophet", "lightgbm", "sarimax", "ensemble"]
 
 from demand_forecasting.evaluation.eval_suite import rmse, wape
 from demand_forecasting.models.baselines import seasonal_naive_forecast
@@ -86,6 +84,8 @@ logging.getLogger("cmdstanpy").setLevel(logging.WARNING)
 logging.getLogger("prophet").setLevel(logging.WARNING)
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 warnings.filterwarnings("ignore")
+
+MODEL_ORDER = ["naive", "prophet", "lightgbm", "sarimax", "ensemble"]
 
 IN_DIR = OUTPUT_ROOT / "stage2_data_prep"
 OUT = OUTPUT_ROOT / "stage3_modeling"

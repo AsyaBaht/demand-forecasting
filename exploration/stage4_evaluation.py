@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 from common import OUTPUT_ROOT, holidays_per_month
 from mapie.regression import SplitConformalRegressor
-from pipeline_config import PipelineConfig
+from run_pipeline import PipelineConfig
 from scipy import stats
 from sklearn.base import BaseEstimator, RegressorMixin
 

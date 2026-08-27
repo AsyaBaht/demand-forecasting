@@ -1,8 +1,0 @@
-{
-  "categories": null,
-  "models": ["naive", "prophet", "lightgbm", "sarimax", "ensemble"],
-  "test_months": 12,
-  "val_months": 6,
-  "forecast_horizon": 12,
-  "skip_stages": []
-}
